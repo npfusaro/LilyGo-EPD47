@@ -10,7 +10,6 @@
 #include <xtensa/core-macros.h>
 
 #include <string.h>
-#include <hal/gpio_ll.h>
 
 /******************************************************************************/
 /***        macro definitions                                               ***/
@@ -19,18 +18,6 @@
 /******************************************************************************/
 /***        type definitions                                                ***/
 /******************************************************************************/
-
-typedef struct
-{
-    bool ep_latch_enable : 1;
-    bool power_disable : 1;
-    bool pos_power_enable : 1;
-    bool neg_power_enable : 1;
-    bool ep_stv : 1;
-    bool ep_scan_direction : 1;
-    bool ep_mode : 1;
-    bool ep_output_enable : 1;
-} epd_config_register_t;
 
 /******************************************************************************/
 /***        local function prototypes                                       ***/
@@ -44,8 +31,6 @@ typedef struct
 /***        local variables                                                 ***/
 /******************************************************************************/
 
-static epd_config_register_t config_reg;
-
 /******************************************************************************/
 /***        exported functions                                              ***/
 /******************************************************************************/
@@ -54,49 +39,6 @@ static epd_config_register_t config_reg;
  * Write bits directly using the registers.
  * Won't work for some pins (>= 32).
  */
-inline static void fast_gpio_set_hi(gpio_num_t gpio_num)
-{
-    GPIO.out_w1ts = (1 << gpio_num);
-}
-
-inline static void fast_gpio_set_lo(gpio_num_t gpio_num)
-{
-    GPIO.out_w1tc = (1 << gpio_num);
-}
-
-inline static void IRAM_ATTR push_cfg_bit(bool bit)
-{
-    fast_gpio_set_lo(CFG_CLK);
-    if (bit)
-    {
-        fast_gpio_set_hi(CFG_DATA);
-    }
-    else
-    {
-        fast_gpio_set_lo(CFG_DATA);
-    }
-    fast_gpio_set_hi(CFG_CLK);
-}
-
-static void IRAM_ATTR push_cfg(epd_config_register_t *cfg)
-{
-    fast_gpio_set_lo(CFG_STR);
-
-    // push config bits in reverse order
-    push_cfg_bit(cfg->ep_output_enable);
-    push_cfg_bit(cfg->ep_mode);
-    push_cfg_bit(cfg->ep_scan_direction);
-    push_cfg_bit(cfg->ep_stv);
-
-    push_cfg_bit(cfg->neg_power_enable);
-    push_cfg_bit(cfg->pos_power_enable);
-    push_cfg_bit(cfg->power_disable);
-    push_cfg_bit(cfg->ep_latch_enable);
-
-    fast_gpio_set_hi(CFG_STR);
-}
-
-
 void IRAM_ATTR busy_delay(uint32_t cycles)
 {
     volatile uint64_t counts = XTHAL_GET_CCOUNT() + cycles;
@@ -105,23 +47,18 @@ void IRAM_ATTR busy_delay(uint32_t cycles)
 
 
 void epd_base_init(uint32_t epd_row_width)
-{
-    config_reg.ep_latch_enable = false;
-    config_reg.power_disable = true;
-    config_reg.pos_power_enable = false;
-    config_reg.neg_power_enable = false;
-    config_reg.ep_stv = true;
-    config_reg.ep_scan_direction = true;
-    config_reg.ep_mode = false;
-    config_reg.ep_output_enable = false;
+{    /* Power Control Output/Off */
+    gpio_set_direction(OE, GPIO_MODE_OUTPUT);
+    gpio_set_direction(MODE, GPIO_MODE_OUTPUT);
+    gpio_set_direction(PWR, GPIO_MODE_OUTPUT);
+    gpio_set_direction(STV, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LEH, GPIO_MODE_OUTPUT);
 
-    /* Power Control Output/Off */
-    gpio_set_direction(CFG_DATA, GPIO_MODE_OUTPUT);
-    gpio_set_direction(CFG_CLK, GPIO_MODE_OUTPUT);
-    gpio_set_direction(CFG_STR, GPIO_MODE_OUTPUT);
-    fast_gpio_set_lo(CFG_STR);
-
-    push_cfg(&config_reg);
+    gpio_set_level(OE, 0);
+    gpio_set_level(MODE, 0);
+    gpio_set_level(PWR, 0);
+    gpio_set_level(STV, 1);
+    gpio_set_level(LEH, 0);
 
     // Setup I2S
     i2s_bus_config i2s_config;
@@ -145,76 +82,48 @@ void epd_base_init(uint32_t epd_row_width)
 
 void epd_poweron()
 {
-    config_reg.ep_scan_direction = true;
-    config_reg.power_disable = false;
-    push_cfg(&config_reg);
+    gpio_set_level(PWR, 1);
     busy_delay(100 * 240);
-    config_reg.neg_power_enable = true;
-    push_cfg(&config_reg);
-    busy_delay(500 * 240);
-    config_reg.pos_power_enable = true;
-    push_cfg(&config_reg);
-    busy_delay(100 * 240);
-    config_reg.ep_stv = true;
-    push_cfg(&config_reg);
-    fast_gpio_set_hi(STH);
+    gpio_set_level(STV, 1);
+    gpio_set_level(STH, 1);
 }
 
 void epd_poweroff()
 {
-    config_reg.pos_power_enable = false;
-    push_cfg(&config_reg);
-    busy_delay(10 * 240);
-    config_reg.neg_power_enable = false;
-    push_cfg(&config_reg);
+    gpio_set_level(PWR, 0);
     busy_delay(100 * 240);
-    config_reg.power_disable = true;
-    push_cfg(&config_reg);
-
-    config_reg.ep_stv = false;
-    push_cfg(&config_reg);
+    gpio_set_level(STV, 0);
 }
 
 void epd_poweroff_all()
 {
-    memset(&config_reg, 0, sizeof(config_reg));
-    push_cfg(&config_reg);
+    gpio_set_level(PWR, 0);
+    gpio_set_level(STV, 0);
 }
 
 void epd_start_frame()
 {
     while (i2s_is_busy()) ;
-
-    config_reg.ep_mode = true;
-    push_cfg(&config_reg);
+    
+    gpio_set_level(MODE, 1);
 
     pulse_ckv_us(1, 1, true);
-
-    // This is very timing-sensitive!
-    config_reg.ep_stv = false;
-    push_cfg(&config_reg);
+    gpio_set_level(STV, 0);
     busy_delay(240);
     pulse_ckv_us(10, 10, false);
-    config_reg.ep_stv = true;
-    push_cfg(&config_reg);
+    gpio_set_level(STV, 1);
     pulse_ckv_us(0, 10, true);
-
-    config_reg.ep_output_enable = true;
-    push_cfg(&config_reg);
-
+    gpio_set_level(OE, 1);
     pulse_ckv_us(1, 1, true);
 }
 
 static inline void latch_row()
 {
-    config_reg.ep_latch_enable = true;
-    push_cfg(&config_reg);
-
-    config_reg.ep_latch_enable = false;
-    push_cfg(&config_reg);
+    gpio_set_level(LEH, 1);
+    gpio_set_level(LEH, 0);
 }
 
-void  epd_skip()
+void IRAM_ATTR epd_skip()
 {
 #if defined(CONFIG_EPD_DISPLAY_TYPE_ED097TC2)
     pulse_ckv_ticks(2, 2, false);
@@ -224,7 +133,7 @@ void  epd_skip()
 #endif
 }
 
-void  epd_output_row(uint32_t output_time_dus)
+void IRAM_ATTR epd_output_row(uint32_t output_time_dus)
 {
     while (i2s_is_busy());
 
@@ -238,20 +147,18 @@ void  epd_output_row(uint32_t output_time_dus)
 
 void epd_end_frame()
 {
-    config_reg.ep_output_enable = false;
-    push_cfg(&config_reg);
-    config_reg.ep_mode = false;
-    push_cfg(&config_reg);
+    gpio_set_level(OE, 0);
+    gpio_set_level(MODE, 0);
     pulse_ckv_us(1, 1, true);
     pulse_ckv_us(1, 1, true);
 }
 
-void  epd_switch_buffer()
+void IRAM_ATTR epd_switch_buffer()
 {
     i2s_switch_buffer();
 }
 
-uint8_t *  epd_get_current_buffer()
+uint8_t * IRAM_ATTR epd_get_current_buffer()
 {
     return (uint8_t *)i2s_get_current_buffer();
 }

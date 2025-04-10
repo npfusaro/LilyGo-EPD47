@@ -51,6 +51,8 @@ extern "C" {
 /* Control Lines */
 #define CKV GPIO_NUM_38
 #define STH GPIO_NUM_40
+#define LEH GPIO_NUM_12
+#define STV GPIO_NUM_45
 
 /* Edges */
 #define CKH GPIO_NUM_41
@@ -64,6 +66,10 @@ extern "C" {
 #define D2 GPIO_NUM_2
 #define D1 GPIO_NUM_1
 #define D0 GPIO_NUM_8
+
+#define OE GPIO_NUM_39
+#define MODE GPIO_NUM_48
+#define PWR GPIO_NUM_13
 
 #else
     #error "Unknown SOC"
@@ -111,17 +117,17 @@ void epd_end_frame();
  *       This sequence of operations allows for pipelining data preparation and
  *       transfer, reducing total refresh times.
  */
-void  epd_output_row(uint32_t output_time_dus);
+void IRAM_ATTR epd_output_row(uint32_t output_time_dus);
 
 /**
  * @brief Skip a row without writing to it.
  */
-void  epd_skip();
+void IRAM_ATTR epd_skip();
 
 /**
  * @brief Get the currently writable line buffer.
  */
-uint8_t *  epd_get_current_buffer();
+uint8_t * IRAM_ATTR epd_get_current_buffer();
 
 /**
  * @brief Switches front and back line buffer.
@@ -129,7 +135,7 @@ uint8_t *  epd_get_current_buffer();
  * @note If the switched-to line buffer is currently in use, this function
  *       blocks until transmission is done.
  */
-void  epd_switch_buffer();
+void IRAM_ATTR epd_switch_buffer();
 
 #ifdef __cplusplus
 }
